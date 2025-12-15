@@ -24,8 +24,20 @@ import {
   Users,
   FileCode,
   Copy,
-  Check
+  Check,
+  LogOut,
+  UserMinus
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { formatDistanceToNow } from 'date-fns';
 
 interface Group {
@@ -82,6 +94,11 @@ export default function GroupWorkspace() {
   const [newProgramName, setNewProgramName] = useState('');
   const [newProgramLang, setNewProgramLang] = useState<Language>('javascript');
   const [copied, setCopied] = useState(false);
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [removeMemberDialog, setRemoveMemberDialog] = useState<GroupMember | null>(null);
+
+  const currentUserMember = members.find(m => m.user_id === user?.id);
+  const isAdmin = currentUserMember?.role === 'admin';
 
   const fetchGroupData = useCallback(async () => {
     if (!groupId || !user) return;
@@ -306,6 +323,53 @@ export default function GroupWorkspace() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const leaveGroup = async () => {
+    if (!user || !groupId) return;
+
+    try {
+      const { error } = await supabase
+        .from('group_members')
+        .delete()
+        .eq('group_id', groupId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      toast.success('You left the group');
+      navigate('/groups');
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
+  const removeMember = async (member: GroupMember) => {
+    if (!user || !groupId || !isAdmin) return;
+
+    try {
+      const { error } = await supabase
+        .from('group_members')
+        .delete()
+        .eq('group_id', groupId)
+        .eq('user_id', member.user_id);
+
+      if (error) throw error;
+
+      toast.success(`${member.profile?.name || 'Member'} removed from group`);
+      setRemoveMemberDialog(null);
+      fetchGroupData();
+
+      await supabase.from('activities').insert({
+        user_id: user.id,
+        group_id: groupId,
+        action: 'removed',
+        target_type: 'member',
+        target_name: member.profile?.name || 'Unknown',
+      });
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
   const getInitials = (name?: string) =>
     name?.split(' ').map((n) => n[0]).join('').toUpperCase() || '?';
 
@@ -456,15 +520,26 @@ export default function GroupWorkspace() {
 
         {/* Members Section */}
         <div className="border-t border-sidebar-border">
-          <div className="p-3">
+          <div className="p-3 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
               Members
             </span>
+            {!isAdmin && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={() => setLeaveDialogOpen(true)}
+              >
+                <LogOut className="w-3 h-3 mr-1" />
+                Leave
+              </Button>
+            )}
           </div>
           <ScrollArea className="h-32">
             <div className="px-2 pb-2 space-y-1">
               {members.map((member) => (
-                <div key={member.user_id} className="flex items-center gap-2 p-2 rounded-lg">
+                <div key={member.user_id} className="flex items-center gap-2 p-2 rounded-lg group">
                   <Avatar className="h-6 w-6">
                     <AvatarFallback className="text-xs bg-primary/20 text-primary">
                       {getInitials(member.profile?.name)}
@@ -472,15 +547,65 @@ export default function GroupWorkspace() {
                   </Avatar>
                   <span className="text-sm text-muted-foreground truncate flex-1">
                     {member.profile?.name || 'Unknown'}
+                    {member.user_id === user?.id && ' (You)'}
                   </span>
                   {member.role === 'admin' && (
                     <Badge variant="secondary" className="text-[10px] px-1">Admin</Badge>
+                  )}
+                  {isAdmin && member.user_id !== user?.id && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => setRemoveMemberDialog(member)}
+                    >
+                      <UserMinus className="w-3 h-3" />
+                    </Button>
                   )}
                 </div>
               ))}
             </div>
           </ScrollArea>
         </div>
+
+        {/* Leave Group Dialog */}
+        <AlertDialog open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Leave Group?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to leave "{group?.name}"? You'll need to rejoin using the invite code.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={leaveGroup} className="bg-destructive hover:bg-destructive/90">
+                Leave Group
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Remove Member Dialog */}
+        <AlertDialog open={!!removeMemberDialog} onOpenChange={() => setRemoveMemberDialog(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove Member?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to remove {removeMemberDialog?.profile?.name || 'this member'} from the group?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction 
+                onClick={() => removeMemberDialog && removeMember(removeMemberDialog)} 
+                className="bg-destructive hover:bg-destructive/90"
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       {/* Main Editor Area */}
