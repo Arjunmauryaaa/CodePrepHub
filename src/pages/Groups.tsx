@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuthStore } from '@/stores/authStore';
 import { useGroupStore } from '@/stores/groupStore';
+import { useEditorStore, Language, defaultCode, languageConfig } from '@/stores/editorStore';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,18 +14,20 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import {
   Users,
   Plus,
-  Link as LinkIcon,
   UserPlus,
   Crown,
   Code2,
   Copy,
   Check,
   ArrowRight,
-  FolderOpen
+  FolderOpen,
+  Eye,
+  Edit3
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -53,6 +57,7 @@ interface GroupProgram {
   id: string;
   title: string;
   language: string;
+  code: string;
   user_id: string;
   created_at: string;
   updated_at: string;
@@ -63,15 +68,23 @@ interface GroupProgram {
 
 export default function Groups() {
   const { user } = useAuthStore();
+  const navigate = useNavigate();
+  const { setActiveProgram, setCode, setLanguage } = useEditorStore();
   const { groups, setGroups, activeGroup, setActiveGroup, members, setMembers } = useGroupStore();
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [joinDialogOpen, setJoinDialogOpen] = useState(false);
+  const [addProgramDialogOpen, setAddProgramDialogOpen] = useState(false);
+  const [viewProgramDialogOpen, setViewProgramDialogOpen] = useState(false);
+  const [selectedProgram, setSelectedProgram] = useState<GroupProgram | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDesc, setNewGroupDesc] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [groupPrograms, setGroupPrograms] = useState<GroupProgram[]>([]);
+  const [newProgramName, setNewProgramName] = useState('');
+  const [newProgramLang, setNewProgramLang] = useState<Language>('javascript');
+  const [newProgramCode, setNewProgramCode] = useState(defaultCode.javascript);
 
   const fetchGroups = useCallback(async () => {
     if (!user) return;
@@ -137,7 +150,7 @@ export default function Groups() {
       // Fetch group programs
       const { data: programsData } = await supabase
         .from('programs')
-        .select('id, title, language, user_id, created_at, updated_at')
+        .select('id, title, language, code, user_id, created_at, updated_at')
         .eq('group_id', groupId)
         .eq('is_group_program', true)
         .order('updated_at', { ascending: false });
@@ -268,6 +281,58 @@ export default function Groups() {
     } catch (err: any) {
       toast.error(err.message);
     }
+  };
+
+  const addGroupProgram = async () => {
+    if (!user || !activeGroup || !newProgramName.trim()) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('programs')
+        .insert({
+          title: newProgramName.trim(),
+          language: newProgramLang,
+          code: newProgramCode,
+          user_id: user.id,
+          group_id: activeGroup.id,
+          is_group_program: true,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      toast.success('Program added to group!');
+      setNewProgramName('');
+      setNewProgramCode(defaultCode.javascript);
+      setNewProgramLang('javascript');
+      setAddProgramDialogOpen(false);
+      fetchGroupDetails(activeGroup.id);
+
+      await supabase.from('activities').insert({
+        user_id: user.id,
+        group_id: activeGroup.id,
+        action: 'created',
+        target_type: 'program',
+        target_id: data.id,
+        target_name: newProgramName.trim(),
+      });
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
+  const openProgramInEditor = (program: GroupProgram) => {
+    // Navigate to workspace with the program loaded
+    setActiveProgram({
+      ...program,
+      folder_id: null,
+      is_group_program: true,
+      group_id: activeGroup?.id || null,
+    } as any);
+    setCode(program.code || '');
+    setLanguage(program.language as Language);
+    navigate('/workspace');
   };
 
   const copyInviteLink = async () => {
@@ -458,11 +523,73 @@ export default function Groups() {
                   </TabsList>
 
                   <TabsContent value="programs" className="mt-4">
+                    {/* Add Program Button */}
+                    <div className="mb-4">
+                      <Dialog open={addProgramDialogOpen} onOpenChange={setAddProgramDialogOpen}>
+                        <DialogTrigger asChild>
+                          <Button className="bg-primary hover:bg-primary/90">
+                            <Plus className="w-4 h-4 mr-2" />
+                            Add Program
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-2xl">
+                          <DialogHeader>
+                            <DialogTitle>Add Program to Group</DialogTitle>
+                          </DialogHeader>
+                          <div className="space-y-4 pt-4">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label>Program Name</Label>
+                                <Input
+                                  value={newProgramName}
+                                  onChange={(e) => setNewProgramName(e.target.value)}
+                                  placeholder="e.g., Binary Search"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Language</Label>
+                                <Select 
+                                  value={newProgramLang} 
+                                  onValueChange={(v) => {
+                                    setNewProgramLang(v as Language);
+                                    setNewProgramCode(defaultCode[v as Language]);
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="javascript">JavaScript</SelectItem>
+                                    <SelectItem value="python">Python</SelectItem>
+                                    <SelectItem value="java">Java</SelectItem>
+                                    <SelectItem value="cpp">C++</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Code</Label>
+                              <Textarea
+                                value={newProgramCode}
+                                onChange={(e) => setNewProgramCode(e.target.value)}
+                                placeholder="Paste your code here..."
+                                rows={12}
+                                className="font-mono text-sm"
+                              />
+                            </div>
+                            <Button onClick={addGroupProgram} className="w-full">
+                              Add Program to Group
+                            </Button>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                    </div>
+
                     {groupPrograms.length === 0 ? (
                       <div className="text-center py-12 text-muted-foreground">
                         <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-30" />
                         <p>No programs yet</p>
-                        <p className="text-sm mt-1">Group members can add programs here</p>
+                        <p className="text-sm mt-1">Click "Add Program" to share code with your group</p>
                       </div>
                     ) : (
                       <ScrollArea className="h-[350px]">
@@ -470,21 +597,42 @@ export default function Groups() {
                           {groupPrograms.map((program) => (
                             <div
                               key={program.id}
-                              className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors"
+                              className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors border border-border/50"
                             >
-                              <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-lg">
+                              <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center text-xl">
                                 {languageIcons[program.language] || '📄'}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="font-medium text-foreground truncate">{program.title}</p>
                                 <p className="text-xs text-muted-foreground">
-                                  by {program.profile?.name || 'Unknown'} •{' '}
+                                  by <span className="text-primary">{program.profile?.name || 'Unknown'}</span> •{' '}
                                   {formatDistanceToNow(new Date(program.updated_at), { addSuffix: true })}
                                 </p>
                               </div>
-                              <Badge variant="secondary" className="text-xs">
-                                {program.language}
+                              <Badge variant="secondary" className="text-xs mr-2">
+                                {languageConfig[program.language as Language]?.name || program.language}
                               </Badge>
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedProgram(program);
+                                    setViewProgramDialogOpen(true);
+                                  }}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openProgramInEditor(program)}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </Button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -541,6 +689,59 @@ export default function Groups() {
           )}
         </div>
       </div>
+
+      {/* View Program Dialog */}
+      <Dialog open={viewProgramDialogOpen} onOpenChange={setViewProgramDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <span className="text-xl">{languageIcons[selectedProgram?.language || ''] || '📄'}</span>
+              {selectedProgram?.title}
+              <Badge variant="secondary">
+                {languageConfig[selectedProgram?.language as Language]?.name || selectedProgram?.language}
+              </Badge>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              Created by <span className="text-primary">{selectedProgram?.profile?.name}</span> •{' '}
+              {selectedProgram && formatDistanceToNow(new Date(selectedProgram.updated_at), { addSuffix: true })}
+            </div>
+            <ScrollArea className="h-[400px] rounded-lg border border-border bg-editor-bg">
+              <pre className="p-4 font-mono text-sm text-foreground whitespace-pre-wrap">
+                {selectedProgram?.code}
+              </pre>
+            </ScrollArea>
+            <div className="flex gap-2">
+              <Button 
+                onClick={() => {
+                  if (selectedProgram) {
+                    navigator.clipboard.writeText(selectedProgram.code || '');
+                    toast.success('Code copied to clipboard!');
+                  }
+                }}
+                variant="outline"
+                className="flex-1"
+              >
+                <Copy className="w-4 h-4 mr-2" />
+                Copy Code
+              </Button>
+              <Button 
+                onClick={() => {
+                  if (selectedProgram) {
+                    openProgramInEditor(selectedProgram);
+                    setViewProgramDialogOpen(false);
+                  }
+                }}
+                className="flex-1"
+              >
+                <Edit3 className="w-4 h-4 mr-2" />
+                Open in Editor
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
