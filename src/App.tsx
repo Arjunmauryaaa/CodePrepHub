@@ -11,6 +11,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Workspace from "./pages/Workspace";
 import Groups from "./pages/Groups";
+import GroupWorkspace from "./pages/GroupWorkspace";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,13 @@ const App = () => (
               <Route path="/workspace" element={<Workspace />} />
               <Route path="/groups" element={<Groups />} />
             </Route>
+
+            {/* Group workspace - full screen without sidebar */}
+            <Route path="/groups/:groupId/workspace" element={
+              <ProtectedRoute>
+                <GroupWorkspace />
+              </ProtectedRoute>
+            } />
             
             <Route path="*" element={<NotFound />} />
           </Routes>
