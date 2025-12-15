@@ -1,3 +1,4 @@
+import { Analytics } from "@vercel/analytics/react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -23,26 +24,32 @@ const App = () => (
         <AuthProvider>
           <Toaster />
           <Sonner />
+
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<Auth />} />
-            
-            {/* Protected routes with layout */}
+
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/workspace" element={<Workspace />} />
               <Route path="/groups" element={<Groups />} />
             </Route>
 
-            {/* Group workspace - full screen without sidebar */}
-            <Route path="/groups/:groupId/workspace" element={
-              <ProtectedRoute>
-                <GroupWorkspace />
-              </ProtectedRoute>
-            } />
-            
+            <Route
+              path="/groups/:groupId/workspace"
+              element={
+                <ProtectedRoute>
+                  <GroupWorkspace />
+                </ProtectedRoute>
+              }
+            />
+
             <Route path="*" element={<NotFound />} />
           </Routes>
+
+          {/* ✅ ADD THIS */}
+          <Analytics />
+
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
